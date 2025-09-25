@@ -182,12 +182,10 @@ async function requestEDA(graphType, columns) {
 
 
 
-// 🔽 아래 함수를 추가/수정해 주세요.
 async function saveChatHistory() {
     addMessage("대화 기록을 요약하여 저장하고 있습니다...", "bot");
 
     try {
-        // 🔽 API 호출 주소를 '/mcp/save_chat'으로 변경합니다.
         const response = await fetch("/mcp/save_chat", {
             method: "POST",
         });
