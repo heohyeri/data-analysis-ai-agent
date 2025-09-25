@@ -179,3 +179,28 @@ async function requestEDA(graphType, columns) {
         addMessage("⚠️ EDA 요청 실패", "bot");
     }
 }
+
+
+
+// 🔽 아래 함수를 추가/수정해 주세요.
+async function saveChatHistory() {
+    addMessage("대화 기록을 요약하여 저장하고 있습니다...", "bot");
+
+    try {
+        // 🔽 API 호출 주소를 '/mcp/save_chat'으로 변경합니다.
+        const response = await fetch("/mcp/save_chat", {
+            method: "POST",
+        });
+        const result = await response.json();
+
+        if (result.status === "success") {
+            const message = `✅ 대화 기록이 성공적으로 요약되어 **${result.file_path}** 경로에 저장되었습니다.`;
+            addMessage(message, "bot");
+        } else {
+            addMessage("⚠️ 대화 기록 저장에 실패했습니다: " + result.error, "bot");
+        }
+    } catch (error) {
+        console.error("Error saving chat:", error);
+        addMessage("⚠️ 서버와 통신 중 오류가 발생하여 저장을 완료하지 못했습니다.", "bot");
+    }
+}

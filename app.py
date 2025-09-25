@@ -17,7 +17,9 @@ from routes.upload_routes import upload_bp
 from routes.chat_routes import chat_bp
 from routes.summary_routes import summary_bp
 from routes.eda_routes import eda_bp
+from routes.mcp_routes import mcp_bp
 
+app.register_blueprint(mcp_bp, url_prefix="/mcp")
 app.register_blueprint(eda_bp, url_prefix="/eda")
 app.register_blueprint(summary_bp, url_prefix="/summary")
 app.register_blueprint(upload_bp, url_prefix="/upload")
