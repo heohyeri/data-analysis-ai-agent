@@ -89,6 +89,8 @@ def get_summary():
     latest_file = list(uploaded_data.keys())[-1]
     df = uploaded_data[latest_file]
 
-    desc_html = df.describe(include="all").to_html(classes="table table-striped", border=0)
+    # desc_html = df.describe(include="all").to_html(classes="table table-striped", border=0)
+    desc_html = df.describe(include="all").to_html(classes="summary-table", border=0)
+
 
     return {latest_file: desc_html}
