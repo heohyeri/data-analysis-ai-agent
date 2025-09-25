@@ -143,8 +143,8 @@ body {
 .main-content {
     display: flex;
     flex-direction: column;
-    height: 100vh;
     background: #0f172a;
+    overflow: hidden;
 }
 
 .chat-container {
@@ -152,6 +152,7 @@ body {
     display: flex;
     flex-direction: column;
     position: relative;
+    min-height: 0;
 }
 
 .messages-area {
