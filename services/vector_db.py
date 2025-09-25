@@ -1,13 +1,7 @@
-"""
-ChromaDB + Gemini 기반의 벡터 저장/검색 모듈
-- DataFrame 또는 CSV 데이터를 벡터화해서 Chroma DB에 저장
-- 질문을 임베딩하여 유사한 텍스트 검색
-- 각 row의 출처(파일명, 행 번호) 메타데이터 포함
-"""
-
 import os
 import pandas as pd
 from typing import List, Dict, Any
+import asyncio
 
 import chromadb
 import google.generativeai as genai
@@ -15,13 +9,13 @@ import google.generativeai as genai
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="data_collection")
 
 
 def get_gemini_embedding(text: str) -> List[float]:
-    """Gemini API로 텍스트 임베딩 생성"""
+    """[동기] Gemini API로 텍스트 임베딩 생성 (query_db용)"""
     response = genai.embed_content(
         model="models/embedding-001",
         content=text
@@ -29,73 +23,82 @@ def get_gemini_embedding(text: str) -> List[float]:
     return response["embedding"]
 
 
-def add_df_to_db(df: pd.DataFrame, source_name: str = "uploaded_df"):
-    """
-    DataFrame을 row 단위로 벡터 DB에 저장
-    각 row를 "컬럼명: 값" 형태 문자열로 변환하여 embedding
-    """
-    docs, ids, embs, metas = [], [], [], []
+async def get_gemini_embeddings_batch_async(texts: List[str]) -> List[List[float]]:
+    """[비동기] Gemini API로 텍스트 배치의 임베딩을 생성"""
+    response = await genai.embed_content_async(
+        model="models/embedding-001",
+        content=texts,
+        task_type="RETRIEVAL_DOCUMENT"
+    )
+    return response["embedding"]
 
+
+async def add_df_to_db_async(df: pd.DataFrame, source_name: str = "uploaded_df", batch_size: int = 100):
+    """
+    [비동기] DataFrame을 벡터 DB에 저장 (비동기 병렬 처리 적용)
+    """
+    docs, ids, metas = [], [], []
     for i, row in df.iterrows():
-        row_text = ", ".join([f"{col}: {row[col]}" for col in df.columns])
+        row_values = [str(val) if pd.notna(val) else "" for val in row]
+        row_text = ", ".join([f"{col}: {val}" for col, val in zip(df.columns, row_values)])
         doc_id = f"{source_name}_row{i}"
-
         docs.append(row_text)
         ids.append(doc_id)
-        embs.append(get_gemini_embedding(row_text))
         metas.append({"source": source_name, "row": int(i)})
 
-    collection.add(
-        ids=ids,
-        documents=docs,
-        embeddings=embs,
-        metadatas=metas
-    )
+    embedding_tasks = []
+    for i in range(0, len(docs), batch_size):
+        batch_docs_content = docs[i:i + batch_size]
+        task = get_gemini_embeddings_batch_async(batch_docs_content)
+        embedding_tasks.append(task)
+    
+    print(f"🚀 Starting concurrent embedding for {len(embedding_tasks)} batches...")
+    all_embeddings_results = await asyncio.gather(*embedding_tasks)
+    print("✅ All embeddings processed.")
 
-    print(f"✅ {len(docs)}개의 row를 벡터 DB에 추가했습니다. (DataFrame: {source_name})")
+    all_embeddings = [emb for batch_embs in all_embeddings_results for emb in batch_embs]
+    
+    for i in range(0, len(ids), batch_size):
+        collection.add(
+            ids=ids[i:i + batch_size],
+            documents=docs[i:i + batch_size],
+            embeddings=all_embeddings[i:i + batch_size],
+            metadatas=metas[i:i + batch_size]
+        )
+        print(f"📦 Added batch {i // batch_size + 1} to ChromaDB.")
+
+    print(f"✅ Total {len(docs)} rows have been added to the Vector DB. (DataFrame: {source_name})")
+
+
+def add_df_to_db(df: pd.DataFrame, source_name: str = "uploaded_df"):
+    """DataFrame을 비동기 방식으로 처리하는 메인 함수"""
+    asyncio.run(add_df_to_db_async(df, source_name))
 
 
 def add_csv_to_db(file_path: str):
     """CSV 파일을 읽어 벡터 DB에 저장"""
     df = pd.read_csv(file_path)
     source_name = os.path.basename(file_path)
-
-    docs, ids, embs, metas = [], [], [], []
-
-    for i, row in df.iterrows():
-        row_text = ", ".join([f"{col}: {row[col]}" for col in df.columns])
-        doc_id = f"{source_name}_row{i}"
-
-        docs.append(row_text)
-        ids.append(doc_id)
-        embs.append(get_gemini_embedding(row_text))
-        metas.append({"source": source_name, "row": int(i)})
-
-    collection.add(
-        ids=ids,
-        documents=docs,
-        embeddings=embs,
-        metadatas=metas
-    )
-
-    print(f"✅ {len(docs)}개의 row를 벡터 DB에 추가했습니다. ({file_path})")
+    add_df_to_db(df, source_name=source_name)
 
 
 def query_db(question: str, top_k: int = 3) -> List[dict]:
+    """질문을 받아 유사한 문서를 DB에서 검색 (동기 방식)"""
     q_emb = get_gemini_embedding(question)
     results = collection.query(
         query_embeddings=[q_emb],
         n_results=top_k
     )
     docs = results.get("documents", [[]])[0]
-    ids = results.get("ids", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
 
     hits = []
     for i, doc in enumerate(docs):
+        meta = metadatas[i] or {}
         hits.append({
             "text": doc,
-            "source": ids[i] if i < len(ids) else None,
-            "row": i
+            "source": meta.get("source"),
+            "row": meta.get("row")
         })
     return hits
 
@@ -111,10 +114,12 @@ def clear_db():
         print("⚠️ 벡터 DB 초기화 실패:", e)
 
 
-
 if __name__ == "__main__":
+    sample_data = {'col1': range(250), 'col2': [f'text_{i}' for i in range(250)]}
+    sample_df = pd.DataFrame(sample_data)
+    sample_df.to_csv("샘플데이터.csv", index=False)
+    
     add_csv_to_db("샘플데이터.csv")
-    q = "시험년도에서 가장 최근 값은?"
+    q = "text_50과 관련된 내용은?"
     answers = query_db(q)
     print("검색된 유사 텍스트:", answers)
-
