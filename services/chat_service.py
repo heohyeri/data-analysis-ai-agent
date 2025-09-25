@@ -6,7 +6,7 @@ import os
 from services.vector_db import query_db
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-1.5-pro",
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
